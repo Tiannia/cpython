@@ -712,6 +712,17 @@ class TestBuggyCases(GetSourceBase):
             self.assertRaises(IOError, inspect.findsource, co)
             self.assertRaises(IOError, inspect.getsource, co)
 
+    def test_findsource_with_out_of_bounds_lineno(self):
+        mod_len = len(inspect.getsource(mod))
+        src = '\n' * 2* mod_len + "def f(): pass"
+        co = compile(src, mod.__file__, "exec")
+        g, l = {}, {}
+        eval(co, g, l)
+        func = l['f']
+        self.assertEqual(func.__code__.co_firstlineno, 1+2*mod_len)
+        with self.assertRaisesRegex(IOError, "lineno is out of bounds"):
+            inspect.findsource(func)
+
     def test_getsource_on_method(self):
         self.assertSourceEqual(mod2.ClassWithMethod.method, 118, 119)
 
@@ -3238,6 +3249,26 @@ class TestSignatureObject(unittest.TestCase):
         p1 = inspect.signature(lambda x, y: None).parameters
         p2 = inspect.signature(lambda y, x: None).parameters
         self.assertNotEqual(p1, p2)
+
+    def test_signature_annotations_with_local_namespaces(self):
+        class Foo: ...
+        def func(foo: Foo) -> int: pass
+        def func2(foo: Foo, bar: Bar) -> int: pass
+
+        for signature_func in (inspect.signature, inspect.Signature.from_callable):
+            with self.subTest(signature_func = signature_func):
+                sig1 = signature_func(func)
+                self.assertEqual(sig1.return_annotation, 'int')
+                self.assertEqual(sig1.parameters['foo'].annotation, 'Foo')
+
+                sig2 = signature_func(func, localns=locals())
+                self.assertEqual(sig2.return_annotation, int)
+                self.assertEqual(sig2.parameters['foo'].annotation, Foo)
+
+                sig3 = signature_func(func2, globalns={'Bar': int}, localns=locals())
+                self.assertEqual(sig3.return_annotation, int)
+                self.assertEqual(sig3.parameters['foo'].annotation, Foo)
+                self.assertEqual(sig3.parameters['bar'].annotation, int)
 
 
 class TestParameterObject(unittest.TestCase):
